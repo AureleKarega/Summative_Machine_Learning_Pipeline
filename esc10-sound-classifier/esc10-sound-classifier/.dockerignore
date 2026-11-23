@@ -1,0 +1,7 @@
+.git
+notebooks
+results
+tests
+data/uploads
+models
+__pycache__

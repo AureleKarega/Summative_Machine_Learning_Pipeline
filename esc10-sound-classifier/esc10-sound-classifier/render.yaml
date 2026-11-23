@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: esc10-sound-classifier
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: AUTO_RETRAIN_THRESHOLD
+        value: "20"

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESC-10 Sound Classifier</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--ink:#1c2430;--mute:#667085;--line:#e3e6ec;--acc:#2f6fed;--ok:#1a9b5b;--bad:#d1432f}
+@media(prefers-color-scheme:dark){:root{--bg:#12161c;--card:#1b222b;--ink:#e8ecf1;--mute:#9aa6b5;--line:#2b3440;--acc:#6b9bff;--ok:#43c985;--bad:#ff7a66}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{padding:20px 24px;border-bottom:1px solid var(--line);background:var(--card)}
+h1{margin:0;font-size:1.3rem}h2{margin:0 0 12px;font-size:1.05rem}
+main{max-width:1150px;margin:0 auto;padding:20px;display:grid;gap:16px}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+.kpis{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.kpi small{color:var(--mute);display:block}.kpi b{font-size:1.4rem}
+button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 16px;font-size:.95rem;cursor:pointer}
+button.alt{background:transparent;color:var(--acc);border:1px solid var(--acc)}button:disabled{opacity:.5;cursor:wait}
+input[type=text]{padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);width:100%;margin:6px 0}
+input[type=file]{margin:6px 0;max-width:100%}
+.mute{color:var(--mute);font-size:.9rem}.ok{color:var(--ok)}.bad{color:var(--bad)}
+canvas{max-height:260px}table{width:100%;border-collapse:collapse;font-size:.9rem}td,th{padding:6px;border-bottom:1px solid var(--line);text-align:left}
+.bar{height:8px;background:var(--line);border-radius:5px;overflow:hidden}.bar i{display:block;height:100%;background:var(--acc)}
+.story{font-size:.9rem;color:var(--mute);margin:8px 0 0}
+</style>
+</head>
+<body>
+<header><h1>ESC-10 Sound Classifier</h1><div class="mute">Classifies environmental sounds (dog, rain, rooster, chainsaw, ...) &middot; model monitoring, visualizations, upload and retraining</div></header>
+<main>
+
+<section class="kpis" id="kpis"></section>
+
+<section class="grid">
+  <div class="card">
+    <h2>1. Predict a sound</h2>
+    <input type="file" id="pfile" accept=".wav,audio/wav"><br>
+    <audio id="player" controls style="width:100%;margin:8px 0;display:none"></audio>
+    <button id="pbtn">Predict</button>
+    <div id="pout" style="margin-top:12px"></div>
+  </div>
+  <div class="card">
+    <h2>2. Upload data &amp; retrain</h2>
+    <label class="mute">Class label for these clips (new labels create a new class)</label>
+    <input type="text" id="label" placeholder="e.g. dog, rain, door_knock">
+    <input type="file" id="ufiles" accept=".wav" multiple><br>
+    <button id="ubtn">Upload files</button>
+    <div id="uout" class="mute" style="margin:8px 0"></div>
+    <hr style="border:0;border-top:1px solid var(--line)">
+    <div id="rstatus" class="mute" style="margin:8px 0"></div>
+    <button id="rbtn" class="alt">Retrain model now</button>
+  </div>
+</section>
+
+<section class="card"><h2>3. Model performance (fixed hold-out fold)</h2>
+  <div class="grid"><div><canvas id="histChart"></canvas></div><div id="perclass"></div></div>
+</section>
+
+<section class="card"><h2>4. Data visualizations</h2>
+  <div class="grid">
+    <div><canvas id="cntChart"></canvas><p class="story"><b>Balanced classes.</b> Every ESC-10 class has 40 clips, so accuracy is not inflated by a dominant class. Uploaded clips appear here and change the balance.</p></div>
+    <div><canvas id="f1Chart"></canvas><p class="story"><b>Brightness (spectral centroid).</b> Rain (~3.5 kHz) is the brightest sound; dog, rooster, sneezing and helicopter sit around 1.3-1.6 kHz. Noise-like sounds spread energy into high frequencies, while barks, crows and rotor thumps are low and tonal.</p></div>
+    <div><canvas id="f2Chart"></canvas><p class="story"><b>Burstiness (RMS std).</b> Clock tick, crackling fire and rain are steady (low variation), whereas dog and rooster are bursty (about 5-8x higher) because the sound comes and goes within the 5 s clip. This separates continuous from event-like sounds.</p></div>
+    <div><canvas id="f3Chart"></canvas><p class="story"><b>Energy (RMS mean).</b> Helicopter and chainsaw are the loudest; clock tick and sneezing are quietest. Together with brightness this pulls apart sounds that share a pitch range, such as helicopter vs. dog.</p></div>
+  </div>
+  <div style="margin-top:14px"><canvas id="scatter" style="max-height:340px"></canvas>
+  <p class="story"><b>Brightness vs. burstiness.</b> Each dot is one clip. Classes form fairly distinct clusters, which is why a simple model on summary features reaches ~80% accuracy. Overlap (e.g. crackling fire and clock tick) explains most remaining errors.</p></div>
+</section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const COLORS=['#2f6fed','#e4572e','#17a398','#f0a202','#8e5ea2','#3caea3','#d1495b','#00798c','#edae49','#66a182','#9b5de5','#ef476f'];
+let charts={};
+function mk(id,cfg){ if(charts[id]) charts[id].destroy(); charts[id]=new Chart($(id),cfg); }
+async function j(url,opt){const r=await fetch(url,opt); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.detail||d.message||r.statusText); return d;}
+const fmtUp=s=>{s=Math.floor(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return (h?h+'h ':'')+(m?m+'m ':'')+(s%60)+'s'};
+
+async function refreshHealth(){
+  try{
+    const h=await j('/api/health'); const m=(await j('/api/metrics')).current||{};
+    const k=[['Status','<span class="ok">&#9679; Up</span>'],['Uptime',fmtUp(h.uptime_seconds)],['Model version','v'+(h.model_version??'-')],
+      ['Accuracy',m.accuracy!=null?(m.accuracy*100).toFixed(1)+'%':'-'],['Macro F1',m.f1_macro!=null?m.f1_macro.toFixed(3):'-'],
+      ['Predictions served',h.predictions_served],['Container',h.container]];
+    $('kpis').innerHTML=k.map(([a,b])=>`<div class="kpi"><small>${a}</small><b>${b}</b></div>`).join('');
+  }catch(e){ $('kpis').innerHTML='<div class="kpi"><small>Status</small><b class="bad">&#9679; Down</b></div>'; }
+}
+async function refreshStatus(){
+  const s=await j('/api/retrain/status');
+  $('rstatus').innerHTML=`State: <b>${s.state}</b>${s.message?' &mdash; '+s.message:''}<br>Pending uploads: <b>${s.pending_uploads}</b> / auto-retrain at ${s.auto_retrain_threshold}`;
+  $('rbtn').disabled = s.state==='running';
+  return s;
+}
+async function refreshMetrics(){
+  const {current:m,history:h}=await j('/api/metrics');
+  mk('histChart',{type:'line',data:{labels:h.map(x=>'v'+x.version),datasets:[
+    {label:'Accuracy',data:h.map(x=>x.accuracy),borderColor:COLORS[0]},{label:'Macro F1',data:h.map(x=>x.f1_macro),borderColor:COLORS[1]},
+    {label:'Log loss',data:h.map(x=>x.log_loss),borderColor:COLORS[3],yAxisID:'y1'}]},
+    options:{plugins:{title:{display:true,text:'Metrics per model version'}},scales:{y:{min:0,max:1},y1:{position:'right',grid:{drawOnChartArea:false}}}}});
+  const pc=m.per_class||{};
+  $('perclass').innerHTML='<table><tr><th>Class</th><th>Precision</th><th>Recall</th><th>F1</th></tr>'+
+    (m.classes||[]).filter(c=>pc[c]).map(c=>`<tr><td>${c}</td><td>${pc[c].precision.toFixed(2)}</td><td>${pc[c].recall.toFixed(2)}</td><td>${pc[c]['f1-score'].toFixed(2)}</td></tr>`).join('')+'</table>'+
+    `<p class="mute">Precision ${m.precision_macro?.toFixed(3)} &middot; Recall ${m.recall_macro?.toFixed(3)} &middot; Log loss ${m.log_loss?.toFixed(3)} &middot; trained on ${m.n_train} clips, tested on ${m.n_test}</p>`;
+}
+async function refreshVisuals(){
+  const v=await j('/api/visuals'); const cls=Object.keys(v.class_counts);
+  mk('cntChart',{type:'bar',data:{labels:cls,datasets:[{label:'Clips per class',data:cls.map(c=>v.class_counts[c]),backgroundColor:COLORS[0]}]},options:{plugins:{legend:{display:false},title:{display:true,text:'Clips per class'}}}});
+  [['f1Chart','spectral_centroid_mean','Mean spectral centroid (Hz)'],['f2Chart','rms_std','RMS std (loudness variation)'],['f3Chart','rms_mean','Mean RMS energy']].forEach(([id,f,t],i)=>
+    mk(id,{type:'bar',data:{labels:cls,datasets:[{data:cls.map(c=>v.feature_means[c][f]),backgroundColor:COLORS[i+1]}]},options:{plugins:{legend:{display:false},title:{display:true,text:t}}}}));
+  const sc=await j('/api/scatter?x=spectral_centroid_mean&y=rms_std');
+  mk('scatter',{type:'scatter',data:{datasets:Object.entries(sc.points).map(([k,p],i)=>({label:k,data:p.map(a=>({x:a[0],y:a[1]})),backgroundColor:COLORS[i%COLORS.length],pointRadius:3}))},
+    options:{scales:{x:{title:{display:true,text:'Spectral centroid (Hz)'}},y:{title:{display:true,text:'RMS std'}}}}});
+}
+
+$('pfile').onchange=e=>{const f=e.target.files[0]; if(f){$('player').src=URL.createObjectURL(f);$('player').style.display='block';}};
+$('pbtn').onclick=async()=>{
+  const f=$('pfile').files[0]; if(!f){$('pout').innerHTML='<span class="bad">Choose a .wav file first</span>';return;}
+  const fd=new FormData(); fd.append('file',f); $('pbtn').disabled=true; $('pout').textContent='Predicting...';
+  try{ const r=await j('/api/predict',{method:'POST',body:fd});
+    $('pout').innerHTML=`<h3 style="margin:0">${r.prediction} <span class="mute">(${(r.confidence*100).toFixed(1)}%)</span></h3>`+
+      r.top3.map(t=>`<div class="mute" style="margin-top:6px">${t.label} ${(t.probability*100).toFixed(1)}%</div><div class="bar"><i style="width:${t.probability*100}%"></i></div>`).join('');
+  }catch(e){$('pout').innerHTML='<span class="bad">'+e.message+'</span>';}
+  $('pbtn').disabled=false; refreshHealth();
+};
+$('ubtn').onclick=async()=>{
+  const files=$('ufiles').files; const label=$('label').value.trim();
+  if(!label||!files.length){$('uout').innerHTML='<span class="bad">Enter a label and choose .wav files</span>';return;}
+  const fd=new FormData(); fd.append('label',label); [...files].forEach(f=>fd.append('files',f));
+  $('ubtn').disabled=true; $('uout').textContent='Uploading and extracting features...';
+  try{ const r=await j('/api/upload',{method:'POST',body:fd});
+    $('uout').innerHTML=`<span class="ok">Accepted ${r.accepted} file(s) as "${r.label}".</span> ${r.rejected.length?'<span class="bad">Rejected: '+r.rejected.map(x=>x.file+' ('+x.reason+')').join(', ')+'</span>':''}${r.auto_retrain_started?'<br>Auto-retraining started (threshold reached).':''}`;
+  }catch(e){$('uout').innerHTML='<span class="bad">'+e.message+'</span>';}
+  $('ubtn').disabled=false; pollRetrain();
+};
+$('rbtn').onclick=async()=>{ try{await j('/api/retrain',{method:'POST'});}catch(e){alert(e.message);} pollRetrain(); };
+async function pollRetrain(){
+  const s=await refreshStatus();
+  if(s.state==='running'){ setTimeout(pollRetrain,1500); }
+  else { refreshMetrics(); refreshVisuals(); refreshHealth(); }
+}
+refreshHealth(); refreshStatus(); refreshMetrics(); refreshVisuals(); setInterval(refreshHealth,5000);
+</script>
+</body></html>

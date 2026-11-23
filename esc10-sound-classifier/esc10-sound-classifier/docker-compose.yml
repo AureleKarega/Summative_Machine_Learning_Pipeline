@@ -1,0 +1,21 @@
+# Run N API containers behind an nginx load balancer:
+#   docker compose up --build --scale api=1     (then 2, 4, ...)
+# App + dashboard: http://localhost:8080
+services:
+  api:
+    build: .
+    expose: ["8000"]
+    volumes:
+      - app_data:/app/data       # shared so all replicas see uploads
+      - app_models:/app/models   # shared so a retrain in one container updates all
+    environment:
+      - AUTO_RETRAIN_THRESHOLD=20
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["8080:80"]
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on: [api]
+volumes:
+  app_data:
+  app_models:
