@@ -49,11 +49,22 @@ The CSVs in `results/` contain median, 95th percentile, average latency, request
 
 Fill in your own measurements here:
 
-| Containers | Users | Median (ms) | p95 (ms) | Requests/s | Failures |
-|---|---|---|---|---|---|
-| 1 | 100 | | | | |
-| 2 | 100 | | | | |
-| 4 | 100 | | | | |
+### Load test results
+
+Setup: Locust, 100 concurrent users (spawn rate 10/s), 60 s per run, requests sent through an nginx load balancer to N identical API containers on one Windows machine (Docker Desktop). Each run is a mix of `POST /api/predict` (80%) and `GET /api/health` (20%).
+
+| Containers | Total requests | Failures | Throughput (req/s) | Predict avg (ms) | Predict median (ms) | Predict p95 (ms) |
+|---|---|---|---|---|---|---|
+| 1 | 429 | 0 | 7.4 | 12,084 | 8,300 | 26,000 |
+| 2 | 1,189 | 0 | 20.2 | 4,621 | 4,800 | 6,300 |
+| 4 | 1,625 | 0 | 27.1 | 3,283 | 2,900 | 6,600 |
+
+**Observations**
+- Throughput rose from 7.4 to 20.2 req/s with 2 containers (about 2.7x) and to 27.1 req/s with 4 containers (about 3.7x). The median prediction time fell from 8.3 s to 2.9 s.
+- Scaling is sub-linear. The step from 2 to 4 containers gave about 34% more throughput, because all containers share the same CPU of the host machine. The slowest requests (p95) did not improve between 2 and 4 containers.
+- Predictions are CPU-bound (audio feature extraction), so the extra containers help most when requests queue up.
+- The 1-container run had no warm-up, so its first predictions were slow (about 23 s) because of a cold start. This makes its latencies look worse than a warmed-up container would show.
+- A first 4-container attempt right after startup had 6 failed requests (connection reset) and a long stall before it recovered. The rerun after warm-up completed with 0 failures, which shows how cold starts and overload affect the service.
 
 Sanity check on a laptop-class sandbox (single process, 20 users, 20 s): ~8 req/s, median ≈ 1 s, 0 failures. Feature extraction is CPU-bound, which is why adding containers helps.
 
