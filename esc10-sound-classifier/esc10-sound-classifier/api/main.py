@@ -1,9 +1,8 @@
 """FastAPI service: prediction, bulk upload, retraining trigger, monitoring + dashboard UI."""
-import os, re, threading, time, uuid
+import os, pickle, re, threading, time, uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import joblib
 import pandas as pd
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -34,7 +33,8 @@ def get_bundle():
     mtime = T.MODEL_PATH.stat().st_mtime
     with _lock:
         if _cache["mtime"] != mtime:
-            _cache["bundle"] = joblib.load(T.MODEL_PATH)
+            with open(T.MODEL_PATH, "rb") as f:
+                _cache["bundle"] = pickle.load(f)
             _cache["mtime"] = mtime
         return _cache["bundle"]
 

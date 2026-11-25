@@ -5,11 +5,10 @@ Data   : data/base_features.csv  (ESC-10, 400 clips, folds 1-5)
 Split  : folds 1-4 + all uploads -> train, fold 5 (never trained on) -> fixed test set,
          so metrics stay comparable before and after every retrain.
 """
-import csv, json, os, time
+import csv, json, os, pickle, time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (accuracy_score, classification_report, confusion_matrix,
@@ -26,7 +25,7 @@ MODEL_DIR = Path(os.getenv("MODEL_DIR", ROOT / "models"))
 BASE_CSV = DATA_DIR / "base_features.csv"
 UPLOAD_CSV = DATA_DIR / "uploads_features.csv"
 UPLOAD_DIR = DATA_DIR / "uploads"
-MODEL_PATH = MODEL_DIR / "model.joblib"
+MODEL_PATH = MODEL_DIR / "model.pkl"          # pickled dict: {pipeline, features, version}
 METRICS_PATH = MODEL_DIR / "metrics.json"
 HISTORY_PATH = MODEL_DIR / "history.json"
 STATUS_PATH = MODEL_DIR / "retrain_status.json"
@@ -114,7 +113,8 @@ def train(trigger="manual"):
     }
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     tmp = MODEL_PATH.with_suffix(".tmp")
-    joblib.dump({"pipeline": model, "features": FEATURE_NAMES, "version": metrics["version"]}, tmp)
+    with open(tmp, "wb") as f:
+        pickle.dump({"pipeline": model, "features": FEATURE_NAMES, "version": metrics["version"]}, f)
     os.replace(tmp, MODEL_PATH)                     # atomic: replicas never see a half-written model
     _atomic_write_json(METRICS_PATH, metrics)
     hist = read_json(HISTORY_PATH, [])
