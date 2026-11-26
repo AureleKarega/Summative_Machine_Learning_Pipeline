@@ -1,7 +1,7 @@
 # ESC-10 Sound Classifier: ML pipeline, API, dashboard and cloud deployment
 
 ## 1. Video demo
-**YouTube:** [PASTE YOUR YOUTUBE LINK HERE]
+**YouTube:** (https://youtu.be/q-fvm4c1-GA)
 
 ## 2. Live URL
 **Deployed app (Render):** https://summative-machine-learning-pipeline-90rc.onrender.com
